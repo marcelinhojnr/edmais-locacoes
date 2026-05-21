@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ED+ | Sistema de Locações</title>
+  <link rel="icon" href="https://edmaisbrinquedos.com.br/logo.png">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Poppins', system-ui, sans-serif; background: var(--bg); color: var(--text); transition: background .3s, color .3s; }
+    :root { --bg:#f8f5ff; --card:#fff; --border:#f0eaf8; --text:#1f2937; --sub:#6b7280; --muted:#9ca3af; --primary:#7c3aed; --primary2:#5b21b6; --inp-bg:#fff; }
+    .dark { --bg:#0f0f13; --card:#1a1a24; --border:#2d2d3d; --text:#f1f5f9; --sub:#94a3b8; --muted:#64748b; --primary:#a78bfa; --primary2:#7c3aed; --inp-bg:#232333; }
+    input, select, textarea { background: var(--inp-bg); color: var(--text); border-color: var(--border); }
+    input::placeholder, textarea::placeholder { color: var(--muted); }
+    optgroup { font-weight:700; font-style:normal; }
+    ::-webkit-scrollbar { width:6px; }
+    ::-webkit-scrollbar-thumb { background:#d8b4fe; border-radius:3px; }
+    .tab-bar { display:flex; overflow-x:auto; scrollbar-width:none; }
+    .tab-bar::-webkit-scrollbar { display:none; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<!-- React 18 -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script>
+  const firebaseConfig = {
+    apiKey:            "AIzaSyDF00X8b12nqLiGjO4GHhE8FpylBl8OW3g",
+    authDomain:        "locacaoedmais.firebaseapp.com",
+    databaseURL:       "https://locacaoedmais-default-rtdb.firebaseio.com",
+    projectId:         "locacaoedmais",
+    storageBucket:     "locacaoedmais.firebasestorage.app",
+    messagingSenderId: "360485654273",
+    appId:             "1:360485654273:web:ed11aaacabd7fc79821500"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+/* ── Dados padrão ─────────────────────────────────────────── */
+const DEFAULT_EQ = [
+  {id:"eq1", name:"Tobogã",                  category:"inflável",   quantity:1},
+  {id:"eq2", name:"Castelão Pula-Pula 6x6m", category:"inflável",   quantity:1},
+  {id:"eq3", name:"Touro Mecânico",           category:"inflável",   quantity:1},
+  {id:"eq4", name:"Cama Elástica 2,44m",      category:"inflável",   quantity:1},
+  {id:"eq5", name:"Cama Elástica 3,10m",      category:"inflável",   quantity:1},
+  {id:"eq6", name:"Cama Elástica 4,27m",      category:"inflável",   quantity:1},
+  {id:"eq7", name:"Toboguinho Coqueirinho",   category:"inflável",   quantity:1},
+  {id:"eq8", name:"Toboágua",                 category:"inflável",   quantity:1},
+  {id:"eq9", name:"Air Game",                 category:"inflável",   quantity:1},
+  {id:"eq10",name:"Kid Play Homem-Aranha",    category:"inflável",   quantity:1},
+  {id:"eq11",name:"Piscina de Bolinhas",      category:"inflável",   quantity:1},
+  {id:"eq12",name:"Multiatividades Circo",    category:"inflável",   quantity:1},
+  {id:"eq13",name:"Canhão de Espuma",         category:"inflável",   quantity:1},
+  {id:"eq14",name:"Mesa",                     category:"mobiliário", quantity:20},
+  {id:"eq15",name:"Cadeira",                  category:"mobiliário", quantity:100},
+  {id:"eq16",name:"Tenda 3x3m",               category:"tenda",      quantity:5},
+  {id:"eq17",name:"Tenda 6x6m",               category:"tenda",      quantity:2},
+];
+
+const CAT_ICONS = {"inflável":"🏰","mobiliário":"🪑","tenda":"⛺"};
+const STATUS_LABELS = {confirmado:"✅ Confirmado",pendente:"⏳ Pendente","concluído":"✓ Concluído",cancelado:"✗ Cancelado"};
+const SENHA = "edplus2024";
+
+const genId   = () => Date.now().toString(36)+Math.random().toString(36).slice(2);
+const fmtDate = d => { if(!d) return ""; const [y,m,day]=d.split("-"); return `${day}/${m}/${y}`; };
+const fmtRange= (s,e) => s&&e?`${s} – ${e}`:s||e||"";
+const toArr   = v => !v?[]:Array.isArray(v)?v:Object.values(v);
+
+function timesOverlap(aS,aE,bS,bE){
+  if(!aS||!aE||!bS||!bE) return true;
+  return aS<bE&&aE>bS;
+}
+function stObj(s){
+  return ({confirmado:{background:"#dcfce7",color:"#15803d"},pendente:{background:"#fef9c3",color:"#92400e"},"concluído":{background:"#f3f4f6",color:"#6b7280"},cancelado:{background:"#fee2e2",color:"#dc2626"}})[s]||{};
+}
+
+/* ══════════════════════════════════════════════════════════
+   TELA DE LOGIN
+══════════════════════════════════════════════════════════ */
+function LoginScreen({onLogin}){
+  const [pw,setPw]=useState("");
+  const [err,setErr]=useState(false);
+  const submit=()=>{ if(pw===SENHA){onLogin();}else{setErr(true);setTimeout(()=>setErr(false),2000);} };
+  return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#7c3aed,#5b21b6)",padding:20}}>
+      <div style={{background:"#fff",borderRadius:24,padding:36,maxWidth:380,width:"100%",textAlign:"center",boxShadow:"0 20px 60px rgba(0,0,0,.2)"}}>
+        <img src="https://edmaisbrinquedos.com.br/logo.png" style={{height:60,marginBottom:20}} alt="ED+"/>
+        <h2 style={{fontSize:20,fontWeight:700,color:"#1f2937",marginBottom:6}}>Sistema de Locações</h2>
+        <p style={{fontSize:13,color:"#9ca3af",marginBottom:24}}>Digite a senha para acessar</p>
+        <input type="password" value={pw} onChange={e=>setPw(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&submit()}
+          placeholder="Senha de acesso"
+          style={{width:"100%",border:`2px solid ${err?"#f87171":"#e5e7eb"}`,borderRadius:12,padding:"12px 16px",fontSize:14,outline:"none",marginBottom:12,textAlign:"center",letterSpacing:4,boxSizing:"border-box"}}/>
+        {err&&<p style={{fontSize:12,color:"#dc2626",marginBottom:8}}>Senha incorreta. Tente novamente.</p>}
+        <button onClick={submit} style={{width:"100%",background:"linear-gradient(135deg,#7c3aed,#5b21b6)",color:"#fff",border:"none",borderRadius:12,padding:"13px",fontWeight:700,fontSize:15,cursor:"pointer",fontFamily:"inherit"}}>
+          Entrar
+        </button>
+        <p style={{fontSize:11,color:"#d1d5db",marginTop:16}}>🔒 Acesso restrito aos sócios ED+</p>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   APP PRINCIPAL
+══════════════════════════════════════════════════════════ */
+function App(){
+  const [logged,setLogged]=useState(()=>sessionStorage.getItem("edplus_auth")==="1");
+  const [dark,setDark]=useState(()=>localStorage.getItem("edplus_dark")==="1");
+  const [view,setView]=useState("dashboard");
+  const [eq,setEq]=useState([]);
+  const [rentals,setR]=useState([]);
+  const [loading,setLoad]=useState(true);
+  const [selId,setSelId]=useState(null);
+  const [editRental,setEditRental]=useState(null);
+
+  useEffect(()=>{
+    document.body.className=dark?"dark":"";
+    localStorage.setItem("edplus_dark",dark?"1":"0");
+  },[dark]);
+
+  useEffect(()=>{
+    if(!logged) return;
+    const eqRef=db.ref("edplus/equipment");
+    const rRef=db.ref("edplus/rentals");
+    let eq0=false,r0=false;
+    const done=()=>{ if(eq0&&r0) setLoad(false); };
+    const eqH=eqRef.on("value",snap=>{
+      const val=snap.val();
+      if(val){setEq(toArr(val));}
+      else{const o={};DEFAULT_EQ.forEach(e=>{o[e.id]=e;});eqRef.set(o);setEq(DEFAULT_EQ);}
+      if(!eq0){eq0=true;done();}
+    });
+    const rH=rRef.on("value",snap=>{
+      const val=snap.val()||{};
+      setR(Object.values(val).map(r=>({...r,items:toArr(r.items)})));
+      if(!r0){r0=true;done();}
+    });
+    return()=>{eqRef.off("value",eqH);rRef.off("value",rH);};
+  },[logged]);
+
+  const login=()=>{sessionStorage.setItem("edplus_auth","1");setLogged(true);};
+
+  const saveEq=async v=>{setEq(v);const o={};v.forEach(e=>{o[e.id]=e;});await db.ref("edplus/equipment").set(o);};
+  const addRental=async r=>db.ref("edplus/rentals").child(r.id).set(r);
+  const updateRental=async r=>db.ref("edplus/rentals").child(r.id).set(r);
+  const updateStatus=async(id,status)=>db.ref("edplus/rentals").child(id).update({status});
+  const deleteRental=async id=>db.ref("edplus/rentals").child(id).remove();
+
+  const checkConflicts=(date,tS,tE,items,excludeId=null)=>{
+    const out=[];
+    for(const item of items){
+      if(!item.equipmentId) continue;
+      const e=eq.find(x=>x.id===item.equipmentId); if(!e) continue;
+      const used=rentals
+        .filter(r=>r.id!==excludeId&&r.status!=="cancelado"&&r.date===date&&timesOverlap(tS,tE,r.timeStart,r.timeEnd))
+        .reduce((s,r)=>s+(toArr(r.items).find(i=>i.equipmentId===item.equipmentId)?.quantity||0),0);
+      const avail=e.quantity-used;
+      if(item.quantity>avail) out.push({name:e.name,needed:item.quantity,available:avail});
+    }
+    return out;
+  };
+
+  if(!logged) return <LoginScreen onLogin={login}/>;
+
+  if(loading) return(
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"linear-gradient(135deg,#7c3aed,#5b21b6)"}}>
+      <div style={{textAlign:"center"}}>
+        <img src="https://edmaisbrinquedos.com.br/logo.png" style={{width:120,marginBottom:16}} alt="ED+"/>
+        <p style={{color:"#fff",fontSize:14,opacity:.8}}>Conectando ao banco de dados...</p>
+      </div>
+    </div>
+  );
+
+  const selRental=rentals.find(r=>r.id===selId);
+  const tabs=[
+    {id:"dashboard",label:"🏠 Início"},
+    {id:"calendar", label:"📅 Calendário"},
+    {id:"rentals",  label:"📋 Locações"},
+    {id:"new",      label:"➕ Nova"},
+    {id:"estoque",  label:"📦 Estoque"},
+  ];
+
+  return(
+    <div style={{minHeight:"100vh",background:"var(--bg)"}}>
+      {/* Header */}
+      <div style={{background:"var(--card)",boxShadow:"0 1px 4px rgba(0,0,0,.08)",position:"sticky",top:0,zIndex:10,borderBottom:"1px solid var(--border)"}}>
+        <div style={{maxWidth:720,margin:"0 auto",padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <img src="https://edmaisbrinquedos.com.br/logo.png" style={{height:38,objectFit:"contain"}} alt="ED+"/>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{width:8,height:8,borderRadius:"50%",background:"#22c55e",display:"inline-block"}} title="Conectado"/>
+            <button onClick={()=>setDark(d=>!d)} style={{background:"var(--border)",border:"none",borderRadius:99,padding:"6px 12px",cursor:"pointer",fontSize:14,color:"var(--text)"}}>
+              {dark?"☀️":"🌙"}
+            </button>
+          </div>
+        </div>
+        <div className="tab-bar" style={{borderTop:"1px solid var(--border)",maxWidth:720,margin:"0 auto"}}>
+          {tabs.map(t=>(
+            <button key={t.id} onClick={()=>setView(t.id)} style={{
+              padding:"10px 16px",fontSize:13,fontWeight:600,whiteSpace:"nowrap",border:"none",
+              background:"none",cursor:"pointer",fontFamily:"inherit",
+              borderBottom:`2px solid ${view===t.id?"var(--primary)":"transparent"}`,
+              color:view===t.id?"var(--primary)":"var(--muted)",transition:"all .15s"
+            }}>{t.label}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{maxWidth:720,margin:"0 auto",padding:"20px 16px"}}>
+        {view==="dashboard" && <Dashboard rentals={rentals} eq={eq} onView={id=>{setSelId(id);setView("detail");}}/>}
+        {view==="calendar"  && <CalendarView rentals={rentals} eq={eq} onView={id=>{setSelId(id);setView("detail");}}/>}
+        {view==="rentals"   && <RentalsList rentals={rentals} eq={eq} onView={id=>{setSelId(id);setView("detail");}}/>}
+        {view==="new"       && <RentalForm eq={eq} rentals={rentals} checkConflicts={checkConflicts}
+          onSave={async r=>{await addRental(r);setSelId(r.id);setView("detail");}}/>}
+        {view==="edit"&&editRental && <RentalForm eq={eq} rentals={rentals} checkConflicts={checkConflicts}
+          initial={editRental}
+          onSave={async r=>{await updateRental(r);setSelId(r.id);setView("detail");}}/>}
+        {view==="estoque"   && <Estoque eq={eq} rentals={rentals} onSave={saveEq}/>}
+        {view==="detail"&&selRental && <RentalDetail
+          rental={selRental} eq={eq}
+          onBack={()=>setView("rentals")}
+          onEdit={()=>{setEditRental(selRental);setView("edit");}}
+          onStatus={s=>updateStatus(selRental.id,s)}
+          onDelete={async()=>{await deleteRental(selRental.id);setView("rentals");}}/>}
+      </div>
+    </div>
+  );
+}
+
+/* ── Dashboard ───────────────────────────────────────────── */
+function Dashboard({rentals,eq,onView}){
+  const today=new Date().toISOString().split("T")[0];
+  const upcoming=rentals.filter(r=>r.date>=today&&r.status!=="cancelado").sort((a,b)=>a.date.localeCompare(b.date)||(a.timeStart||"").localeCompare(b.timeStart||""));
+  const todayR=upcoming.filter(r=>r.date===today);
+  const nextR=upcoming.filter(r=>r.date>today);
+  const active=rentals.filter(r=>r.status==="pendente"||r.status==="confirmado").length;
+  const stats=[
+    {icon:"🎉",label:"Hoje",    val:todayR.length,bg:"#fff7ed",col:"#c2410c"},
+    {icon:"⏰",label:"Próximas",val:nextR.length, bg:"#eff6ff",col:"#1d4ed8"},
+    {icon:"✅",label:"Ativas",  val:active,        bg:"#f0fdf4",col:"#15803d"},
+    {icon:"📦",label:"Itens",   val:eq.length,     bg:"#f5f3ff",col:"#6d28d9"},
+  ];
+  return(
+    <div>
+      <h1 style={{fontSize:22,fontWeight:700,color:"var(--text)",marginBottom:4}}>Olá, ED+ 👋</h1>
+      <p style={{fontSize:13,color:"var(--muted)",marginBottom:20}}>Resumo das suas locações</p>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:24}}>
+        {stats.map(s=>(
+          <div key={s.label} style={{background:s.bg,borderRadius:14,padding:"14px 10px"}}>
+            <div style={{fontSize:20,marginBottom:4}}>{s.icon}</div>
+            <div style={{fontSize:20,fontWeight:700,color:s.col}}>{s.val}</div>
+            <div style={{fontSize:11,fontWeight:600,color:s.col,opacity:.75}}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+      {todayR.length>0&&<>
+        <h2 style={sh}>🎉 Hoje</h2>
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+          {todayR.map(r=><RCard key={r.id} r={r} eq={eq} onClick={()=>onView(r.id)} hi/>)}
+        </div>
+      </>}
+      <h2 style={sh}>📅 Próximas Locações</h2>
+      {nextR.length===0?<Blank>Nenhuma locação futura cadastrada</Blank>
+        :<div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {nextR.slice(0,6).map(r=><RCard key={r.id} r={r} eq={eq} onClick={()=>onView(r.id)}/>)}
+        </div>}
+    </div>
+  );
+}
+
+/* ── Calendário ──────────────────────────────────────────── */
+function CalendarView({rentals,eq,onView}){
+  const today=new Date();
+  const [cur,setCur]=useState({y:today.getFullYear(),m:today.getMonth()});
+  const [selDay,setSelDay]=useState(null);
+
+  const daysInMonth=(y,m)=>new Date(y,m+1,0).getDate();
+  const firstDay=(y,m)=>new Date(y,m,1).getDay();
+  const pad=n=>String(n).padStart(2,"0");
+  const key=(y,m,d)=>`${y}-${pad(m+1)}-${pad(d)}`;
+
+  const rentalsMap={};
+  rentals.filter(r=>r.status!=="cancelado").forEach(r=>{
+    if(!rentalsMap[r.date]) rentalsMap[r.date]=[];
+    rentalsMap[r.date].push(r);
+  });
+
+  const days=daysInMonth(cur.y,cur.m);
+  const fst=firstDay(cur.y,cur.m);
+  const todayStr=`${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+
+  const months=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  const prev=()=>setCur(c=>c.m===0?{y:c.y-1,m:11}:{y:c.y,m:c.m-1});
+  const next=()=>setCur(c=>c.m===11?{y:c.y+1,m:0}:{y:c.y,m:c.m+1});
+
+  const selKey=selDay?key(cur.y,cur.m,selDay):null;
+  const selRentals=selKey?(rentalsMap[selKey]||[]):[];
+
+  return(
+    <div>
+      <h1 style={{fontSize:22,fontWeight:700,color:"var(--text)",marginBottom:20}}>📅 Calendário</h1>
+      <div style={{background:"var(--card)",borderRadius:20,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
+        {/* Nav */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px",borderBottom:"1px solid var(--border)"}}>
+          <button onClick={prev} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"var(--primary)",padding:"4px 8px"}}>‹</button>
+          <span style={{fontWeight:700,fontSize:16,color:"var(--text)"}}>{months[cur.m]} {cur.y}</span>
+          <button onClick={next} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"var(--primary)",padding:"4px 8px"}}>›</button>
+        </div>
+        {/* Dias da semana */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,padding:"12px 12px 0"}}>
+          {["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"].map(d=>(
+            <div key={d} style={{textAlign:"center",fontSize:11,fontWeight:600,color:"var(--muted)",paddingBottom:8}}>{d}</div>
+          ))}
+        </div>
+        {/* Células */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,padding:"0 12px 12px"}}>
+          {Array(fst).fill(null).map((_,i)=><div key={"e"+i}/>)}
+          {Array(days).fill(null).map((_,i)=>{
+            const d=i+1;
+            const dk=key(cur.y,cur.m,d);
+            const rs=rentalsMap[dk]||[];
+            const isToday=dk===todayStr;
+            const isSel=selDay===d;
+            const dot=rs.length>0;
+            return(
+              <button key={d} onClick={()=>setSelDay(isSel?null:d)} style={{
+                position:"relative",aspect:"1/1",borderRadius:10,border:"none",cursor:"pointer",
+                background:isSel?"var(--primary)":isToday?"#ede9fe":"transparent",
+                color:isSel?"#fff":isToday?"var(--primary)":"var(--text)",
+                fontWeight:isToday||isSel?"700":"400",fontSize:13,
+                display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,
+                transition:"background .15s",padding:4,fontFamily:"inherit"
+              }}>
+                {d}
+                {dot&&<div style={{display:"flex",gap:2}}>
+                  {rs.slice(0,3).map((r,ri)=>(
+                    <div key={ri} style={{width:5,height:5,borderRadius:"50%",
+                      background:isSel?"#fff":r.status==="confirmado"?"#22c55e":r.status==="pendente"?"#f59e0b":"#94a3b8"}}/>
+                  ))}
+                </div>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Legenda */}
+      <div style={{display:"flex",gap:16,marginBottom:16,flexWrap:"wrap"}}>
+        {[["#22c55e","Confirmado"],["#f59e0b","Pendente"],["#94a3b8","Outros"]].map(([c,l])=>(
+          <div key={l} style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--sub)"}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:c}}/>
+            {l}
+          </div>
+        ))}
+      </div>
+
+      {/* Locações do dia */}
+      {selDay&&(
+        <div>
+          <h2 style={{...sh,marginBottom:12}}>
+            Locações em {pad(selDay)}/{pad(cur.m+1)}/{cur.y}
+            <span style={{fontSize:12,fontWeight:500,color:"var(--muted)",marginLeft:8}}>({selRentals.length} locação{selRentals.length!==1?"ões":""})</span>
+          </h2>
+          {selRentals.length===0
+            ?<Blank>Nenhuma locação neste dia</Blank>
+            :<div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {selRentals.map(r=><RCard key={r.id} r={r} eq={eq} onClick={()=>onView(r.id)}/>)}
+            </div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Lista de locações ───────────────────────────────────── */
+function RentalsList({rentals,eq,onView}){
+  const [filter,setF]=useState("all");
+  const [search,setS]=useState("");
+  const list=rentals
+    .filter(r=>filter==="all"||r.status===filter)
+    .filter(r=>!search||(r.titularName||"").toLowerCase().includes(search.toLowerCase())||(r.location||"").toLowerCase().includes(search.toLowerCase()))
+    .sort((a,b)=>b.date.localeCompare(a.date));
+  const chips=[["all","Todas"],["pendente","Pendentes"],["confirmado","Confirmadas"],["concluído","Concluídas"],["cancelado","Canceladas"]];
+  return(
+    <div>
+      <h1 style={{fontSize:22,fontWeight:700,color:"var(--text)",marginBottom:16}}>📋 Locações</h1>
+      <input value={search} onChange={e=>setS(e.target.value)} placeholder="Buscar por nome ou local..." style={inp}/>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",margin:"10px 0 16px"}}>
+        {chips.map(([v,l])=>(
+          <button key={v} onClick={()=>setF(v)} style={{
+            padding:"5px 12px",borderRadius:99,fontSize:12,fontWeight:600,cursor:"pointer",border:"1px solid",fontFamily:"inherit",
+            background:filter===v?"var(--primary)":"var(--card)",color:filter===v?"#fff":"var(--muted)",
+            borderColor:filter===v?"var(--primary)":"var(--border)",transition:"all .15s"
+          }}>{l}</button>
+        ))}
+      </div>
+      {list.length===0?<Blank>Nenhuma locação encontrada</Blank>
+        :<div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {list.map(r=><RCard key={r.id} r={r} eq={eq} onClick={()=>onView(r.id)}/>)}
+        </div>}
+    </div>
+  );
+}
+
+/* ── Card de locação ─────────────────────────────────────── */
+function RCard({r,eq,onClick,hi}){
+  const names=toArr(r.items).map(i=>{const e=eq.find(x=>x.id===i.equipmentId);return e?`${e.name}${i.quantity>1?` (${i.quantity}x)`:""}`:"";}).filter(Boolean).join(", ");
+  const timeStr=fmtRange(r.timeStart,r.timeEnd);
+  return(
+    <button onClick={onClick} style={{
+      width:"100%",textAlign:"left",border:`1px solid ${hi?"#fed7aa":"var(--border)"}`,
+      background:hi?"#fff7ed":"var(--card)",borderRadius:14,padding:"12px 14px",cursor:"pointer",transition:"transform .1s"
+    }}>
+      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+            <span style={{fontWeight:700,fontSize:14,color:"var(--text)"}}>{r.titularName}</span>
+            <span style={{fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:99,...stObj(r.status)}}>{STATUS_LABELS[r.status]}</span>
+          </div>
+          <p style={{fontSize:12,color:"var(--sub)",margin:"2px 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📍 {r.location}</p>
+          {r.monitors&&<p style={{fontSize:11,color:"var(--muted)",margin:"2px 0"}}>👷 {r.monitors}</p>}
+          <p style={{fontSize:11,color:"var(--muted)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{names}</p>
+        </div>
+        <div style={{textAlign:"right",flexShrink:0}}>
+          <div style={{fontSize:13,fontWeight:700,color:"var(--primary)"}}>{fmtDate(r.date)}</div>
+          {timeStr&&<div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>🕐 {timeStr}</div>}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+/* ── Formulário de Locação (Nova + Editar) ───────────────── */
+function RentalForm({eq,rentals,checkConflicts,onSave,initial}){
+  const isEdit=!!initial;
+  const empty={date:"",timeStart:"",timeEnd:"",location:"",phone:"",titularName:"",renterName:"",monitors:"",notes:"",status:"pendente",items:[{equipmentId:"",quantity:1}]};
+  const [form,setForm]=useState(initial?{...initial,items:toArr(initial.items)}:empty);
+  const [conflicts,setConf]=useState([]);
+  const [sub,setSub]=useState(false);
+  const [saving,setSaving]=useState(false);
+
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const recheck=(patch={})=>{
+    const f={...form,...patch};
+    if(f.date) setConf(checkConflicts(f.date,f.timeStart,f.timeEnd,f.items.filter(i=>i.equipmentId),isEdit?initial.id:null));
+  };
+  const updItem=(idx,k,v)=>{
+    const items=[...form.items];items[idx]={...items[idx],[k]:v};
+    setForm(f=>({...f,items}));
+    if(form.date) setConf(checkConflicts(form.date,form.timeStart,form.timeEnd,items.filter(i=>i.equipmentId),isEdit?initial.id:null));
+  };
+  const avail=(eqId)=>{
+    if(!form.date||!eqId) return null;
+    const e=eq.find(x=>x.id===eqId);if(!e) return null;
+    const used=rentals
+      .filter(r=>r.id!==(isEdit?initial.id:null)&&r.status!=="cancelado"&&r.date===form.date&&timesOverlap(form.timeStart,form.timeEnd,r.timeStart,r.timeEnd))
+      .reduce((s,r)=>s+(toArr(r.items).find(i=>i.equipmentId===eqId)?.quantity||0),0);
+    return e.quantity-used;
+  };
+  const timeInvalid=form.timeStart&&form.timeEnd&&form.timeStart>=form.timeEnd;
+  const submit=async()=>{
+    setSub(true);
+    const valid=form.items.filter(i=>i.equipmentId);
+    if(!form.titularName||!form.date||!form.location||!form.phone||!valid.length||conflicts.length||timeInvalid) return;
+    setSaving(true);
+    await onSave({...(isEdit?initial:{}),id:isEdit?initial.id:genId(),...form,items:valid,updatedAt:new Date().toISOString(),...(!isEdit?{createdAt:new Date().toISOString()}:{})});
+    setSaving(false);
+  };
+  const err=f=>sub&&!form[f];
+
+  return(
+    <div>
+      <h1 style={{fontSize:22,fontWeight:700,color:"var(--text)",marginBottom:20}}>{isEdit?"✏️ Editar Locação":"➕ Nova Locação"}</h1>
+      <div style={{background:"var(--card)",borderRadius:20,border:"1px solid var(--border)",padding:20,display:"flex",flexDirection:"column",gap:16}}>
+
+        {/* Data + horários */}
+        <div style={{display:"flex",gap:10}}>
+          <Field label="Data do Evento *" err={err("date")} style={{flex:2}}>
+            <input type="date" value={form.date} onChange={e=>{set("date",e.target.value);recheck({date:e.target.value});}}
+              style={{...inp,borderColor:err("date")?"#f87171":"var(--border)"}}/>
+          </Field>
+          <Field label="Início" style={{flex:1}}>
+            <input type="time" value={form.timeStart} onChange={e=>{set("timeStart",e.target.value);recheck({timeStart:e.target.value});}} style={inp}/>
+          </Field>
+          <Field label="Término" style={{flex:1}}>
+            <input type="time" value={form.timeEnd} onChange={e=>{set("timeEnd",e.target.value);recheck({timeEnd:e.target.value});}} style={inp}/>
+          </Field>
+        </div>
+
+        {timeInvalid&&<Alert color="#c2410c" bg="#fff7ed" border="#fed7aa">⚠️ O horário de término deve ser depois do início.</Alert>}
+
+        <Field label="Local do Evento *" err={err("location")}>
+          <input value={form.location} onChange={e=>set("location",e.target.value)} placeholder="Endereço completo"
+            style={{...inp,borderColor:err("location")?"#f87171":"var(--border)"}}/>
+        </Field>
+
+        <Field label="Telefone *" err={err("phone")}>
+          <input type="tel" value={form.phone} onChange={e=>set("phone",e.target.value)} placeholder="(31) 9 0000-0000"
+            style={{...inp,borderColor:err("phone")?"#f87171":"var(--border)"}}/>
+        </Field>
+
+        <div style={{display:"flex",gap:10}}>
+          <Field label="Nome do Titular *" err={err("titularName")} style={{flex:1}}>
+            <input value={form.titularName} onChange={e=>set("titularName",e.target.value)} placeholder="Quem está alugando"
+              style={{...inp,borderColor:err("titularName")?"#f87171":"var(--border)"}}/>
+          </Field>
+          <Field label="Responsável no Local" style={{flex:1}}>
+            <input value={form.renterName} onChange={e=>set("renterName",e.target.value)} placeholder="Quem receberá" style={inp}/>
+          </Field>
+        </div>
+
+        {/* Monitores */}
+        <Field label="👷 Monitor(es)">
+          <input value={form.monitors||""} onChange={e=>set("monitors",e.target.value)}
+            placeholder="Ex: João Silva, Maria Souza" style={inp}/>
+        </Field>
+
+        {/* Itens */}
+        <div>
+          <label style={{fontSize:12,fontWeight:600,color:"var(--text)",display:"block",marginBottom:8}}>Itens Locados *</label>
+          {conflicts.length>0&&(
+            <div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:"10px 14px",marginBottom:10}}>
+              <p style={{color:"#dc2626",fontSize:13,fontWeight:700,margin:"0 0 4px"}}>⚠️ Conflito no período!</p>
+              {conflicts.map((c,i)=><p key={i} style={{fontSize:12,color:"#dc2626",margin:"2px 0"}}>• {c.name}: pedido {c.needed}, disponível: {c.available}</p>)}
+            </div>
+          )}
+          {sub&&!form.items.filter(i=>i.equipmentId).length&&<p style={{fontSize:12,color:"#dc2626",marginBottom:6}}>Adicione ao menos um item</p>}
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {form.items.map((item,idx)=>{
+              const isConf=conflicts.some(c=>{const e=eq.find(x=>x.id===item.equipmentId);return e&&c.name===e.name;});
+              return(
+                <div key={idx} style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <select value={item.equipmentId} onChange={e=>updItem(idx,"equipmentId",e.target.value)}
+                    style={{...inp,flex:1,borderColor:isConf?"#f87171":"var(--border)"}}>
+                    <option value="">Selecionar item...</option>
+                    {["inflável","mobiliário","tenda"].map(cat=>{
+                      const ci=eq.filter(e=>e.category===cat);if(!ci.length) return null;
+                      return(
+                        <optgroup key={cat} label={`${CAT_ICONS[cat]} ${cat}`}>
+                          {ci.map(e=>{const a=avail(e.id);return<option key={e.id} value={e.id}>{e.name}{form.date&&a!==null?` (disp: ${a})`:""}</option>;})}
+                        </optgroup>
+                      );
+                    })}
+                  </select>
+                  <input type="number" min="1" value={item.quantity} onChange={e=>updItem(idx,"quantity",parseInt(e.target.value)||1)}
+                    style={{...inp,width:60,textAlign:"center"}}/>
+                  {form.items.length>1&&(
+                    <button onClick={()=>setForm(f=>({...f,items:f.items.filter((_,i)=>i!==idx)}))}
+                      style={{color:"#f87171",background:"none",border:"none",fontSize:16,cursor:"pointer",padding:"0 4px"}}>✕</button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <button onClick={()=>setForm(f=>({...f,items:[...f.items,{equipmentId:"",quantity:1}]}))}
+            style={{marginTop:8,fontSize:13,color:"var(--primary)",fontWeight:600,background:"none",border:"none",cursor:"pointer",padding:0,fontFamily:"inherit"}}>
+            + Adicionar item
+          </button>
+        </div>
+
+        <Field label="Observações">
+          <textarea value={form.notes} onChange={e=>set("notes",e.target.value)} rows={2}
+            placeholder="Anotações adicionais..." style={{...inp,resize:"none"}}/>
+        </Field>
+
+        <Field label="Status">
+          <select value={form.status} onChange={e=>set("status",e.target.value)} style={{...inp,width:"auto"}}>
+            <option value="pendente">⏳ Pendente</option>
+            <option value="confirmado">✅ Confirmado</option>
+          </select>
+        </Field>
+
+        <button onClick={submit} disabled={conflicts.length>0||!!timeInvalid||saving} style={{
+          width:"100%",padding:"13px",borderRadius:14,border:"none",fontFamily:"inherit",
+          cursor:(conflicts.length>0||timeInvalid||saving)?"not-allowed":"pointer",
+          background:(conflicts.length>0||timeInvalid)?"#d1d5db":"var(--primary)",
+          color:"#fff",fontWeight:700,fontSize:15,transition:"background .15s"
+        }}>{saving?"Salvando...":(isEdit?"Salvar Alterações":"Salvar Locação")}</button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Detalhe da Locação ──────────────────────────────────── */
+function RentalDetail({rental,eq,onBack,onEdit,onStatus,onDelete}){
+  const [del,setDel]=useState(false);
+  const timeStr=fmtRange(rental.timeStart,rental.timeEnd);
+  return(
+    <div>
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        <button onClick={onBack} style={{fontSize:13,color:"var(--primary)",fontWeight:600,background:"none",border:"none",cursor:"pointer",padding:0,fontFamily:"inherit"}}>← Voltar</button>
+      </div>
+      <div style={{background:"var(--card)",borderRadius:20,border:"1px solid var(--border)",overflow:"hidden"}}>
+        {/* Header */}
+        <div style={{background:"linear-gradient(135deg,#7c3aed,#5b21b6)",padding:"20px 20px 16px",color:"#fff"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div>
+              <p style={{fontSize:11,fontWeight:600,opacity:.7,textTransform:"uppercase",letterSpacing:1,margin:"0 0 4px"}}>Guia de Locação</p>
+              <h2 style={{fontSize:20,fontWeight:700,margin:"0 0 4px"}}>{rental.titularName}</h2>
+              <p style={{fontSize:13,opacity:.8,margin:0}}>📅 {fmtDate(rental.date)}{timeStr&&<span style={{marginLeft:10}}>🕐 {timeStr}</span>}</p>
+            </div>
+            <img src="https://edmaisbrinquedos.com.br/logo.png" style={{height:36,objectFit:"contain",opacity:.9}} alt="ED+"/>
+          </div>
+        </div>
+
+        {/* Status */}
+        <div style={{padding:"8px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",...stObj(rental.status)}}>
+          <span style={{fontSize:13,fontWeight:600}}>{STATUS_LABELS[rental.status]}</span>
+          <span style={{fontSize:11,opacity:.6}}>#{(rental.id||"").slice(-6).toUpperCase()}</span>
+        </div>
+
+        {/* Campos */}
+        <div style={{padding:"16px 20px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+          <IF label="📍 Local"    val={rental.location}/>
+          <IF label="📱 Telefone" val={rental.phone}/>
+          <IF label="👤 Titular"  val={rental.titularName}/>
+          {rental.renterName&&<IF label="🧑 Resp. no Local" val={rental.renterName}/>}
+          {timeStr&&<IF label="🕐 Horário" val={timeStr}/>}
+          {rental.monitors&&<IF label="👷 Monitor(es)" val={rental.monitors}/>}
+        </div>
+
+        {/* Itens */}
+        <div style={{padding:"0 20px 16px"}}>
+          <p style={{fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Itens Locados</p>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {toArr(rental.items).map((item,i)=>{
+              const e=eq.find(x=>x.id===item.equipmentId);if(!e) return null;
+              return(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:10,background:"var(--bg)",borderRadius:10,padding:"8px 12px"}}>
+                  <span style={{fontSize:18}}>{CAT_ICONS[e.category]}</span>
+                  <span style={{flex:1,fontSize:13,fontWeight:600,color:"var(--text)"}}>{e.name}</span>
+                  <span style={{fontSize:13,fontWeight:700,color:"var(--primary)"}}>{item.quantity}x</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {rental.notes&&(
+          <div style={{padding:"0 20px 16px"}}>
+            <p style={{fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Observações</p>
+            <p style={{fontSize:13,color:"var(--sub)",background:"var(--bg)",borderRadius:10,padding:"8px 12px",margin:0}}>{rental.notes}</p>
+          </div>
+        )}
+
+        {/* Ações */}
+        <div style={{borderTop:"1px solid var(--border)",padding:"14px 20px"}}>
+          <button onClick={onEdit} style={{
+            width:"100%",marginBottom:14,padding:"10px",borderRadius:12,border:"1px solid var(--primary)",
+            background:"transparent",color:"var(--primary)",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit"
+          }}>✏️ Editar esta locação</button>
+
+          <p style={{fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Atualizar Status</p>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+            {[["pendente","⏳ Pendente"],["confirmado","✅ Confirmado"],["concluído","✓ Concluído"],["cancelado","✗ Cancelar"]].map(([s,l])=>(
+              <button key={s} onClick={()=>onStatus(s)} style={{
+                padding:"6px 12px",borderRadius:99,fontSize:12,fontWeight:600,cursor:"pointer",border:"1px solid",fontFamily:"inherit",
+                background:rental.status===s?"var(--primary)":"var(--card)",
+                color:rental.status===s?"#fff":"var(--muted)",
+                borderColor:rental.status===s?"var(--primary)":"var(--border)",transition:"all .15s"
+              }}>{l}</button>
+            ))}
+          </div>
+          {!del
+            ?<button onClick={()=>setDel(true)} style={{fontSize:12,color:"#f87171",background:"none",border:"none",cursor:"pointer",padding:0,fontFamily:"inherit"}}>🗑 Excluir locação</button>
+            :<div style={{display:"flex",gap:10,alignItems:"center"}}>
+              <span style={{fontSize:12,color:"#dc2626"}}>Confirmar exclusão?</span>
+              <button onClick={onDelete} style={{fontSize:12,color:"#dc2626",fontWeight:700,background:"none",border:"none",cursor:"pointer",fontFamily:"inherit"}}>Sim</button>
+              <button onClick={()=>setDel(false)} style={{fontSize:12,color:"var(--muted)",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
+            </div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Estoque ─────────────────────────────────────────────── */
+function Estoque({eq,rentals,onSave}){
+  const [showForm,setSF]=useState(false);
+  const [edit,setEdit]=useState(null);
+  const [form,setForm]=useState({name:"",category:"inflável",quantity:1});
+  const today=new Date().toISOString().split("T")[0];
+  const usedToday=id=>rentals.filter(r=>r.status!=="cancelado"&&r.date===today)
+    .reduce((s,r)=>s+(toArr(r.items).find(i=>i.equipmentId===id)?.quantity||0),0);
+  const openAdd=()=>{setEdit(null);setForm({name:"",category:"inflável",quantity:1});setSF(true);};
+  const openEdit=item=>{setEdit(item);setForm({name:item.name,category:item.category,quantity:item.quantity});setSF(true);};
+  const save=()=>{
+    if(!form.name||!form.quantity) return;
+    const qty=parseInt(form.quantity);
+    if(edit) onSave(eq.map(e=>e.id===edit.id?{...e,...form,quantity:qty}:e));
+    else onSave([...eq,{id:genId(),...form,quantity:qty}]);
+    setSF(false);setEdit(null);
+  };
+  const grouped=["inflável","mobiliário","tenda"].map(cat=>({cat,items:eq.filter(e=>e.category===cat)})).filter(g=>g.items.length);
+  return(
+    <div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+        <h1 style={{fontSize:22,fontWeight:700,color:"var(--text)"}}>📦 Estoque</h1>
+        <button onClick={openAdd} style={{background:"var(--primary)",color:"#fff",border:"none",borderRadius:12,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Novo Item</button>
+      </div>
+      {showForm&&(
+        <div style={{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:18,marginBottom:20}}>
+          <p style={{fontWeight:700,fontSize:14,color:"var(--text)",marginBottom:14}}>{edit?"Editar Item":"Novo Item"}</p>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <Field label="Nome"><input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="Ex: Tobogã" style={inp}/></Field>
+            <div style={{display:"flex",gap:10}}>
+              <Field label="Categoria" style={{flex:1}}>
+                <select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))} style={inp}>
+                  <option value="inflável">🏰 Inflável</option>
+                  <option value="mobiliário">🪑 Mobiliário</option>
+                  <option value="tenda">⛺ Tenda</option>
+                </select>
+              </Field>
+              <Field label="Quantidade" style={{flex:1}}>
+                <input type="number" min="1" value={form.quantity} onChange={e=>setForm(f=>({...f,quantity:e.target.value}))} style={inp}/>
+              </Field>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={save} style={{flex:1,background:"var(--primary)",color:"#fff",border:"none",borderRadius:10,padding:"10px",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Salvar</button>
+              <button onClick={()=>setSF(false)} style={{padding:"10px 16px",border:"1px solid var(--border)",borderRadius:10,fontSize:13,cursor:"pointer",background:"var(--card)",color:"var(--sub)",fontFamily:"inherit"}}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {grouped.map(({cat,items})=>(
+        <div key={cat} style={{marginBottom:20}}>
+          <h2 style={{fontSize:12,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>{CAT_ICONS[cat]} {cat}</h2>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {items.map(item=>{
+              const used=usedToday(item.id),avail=item.quantity-used;
+              return(
+                <div key={item.id} style={{background:"var(--card)",borderRadius:12,border:"1px solid var(--border)",padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{flex:1}}>
+                    <p style={{fontSize:14,fontWeight:600,color:"var(--text)",margin:"0 0 3px"}}>{item.name}</p>
+                    <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                      <span style={{fontSize:11,color:"var(--muted)"}}>Total: {item.quantity}</span>
+                      {used>0&&<span style={{fontSize:11,color:"#ea580c"}}>Hoje em uso: {used}</span>}
+                      <span style={{fontSize:11,fontWeight:600,color:avail===0?"#dc2626":"#16a34a"}}>{avail===0?"⛔ Indisponível hoje":`✅ ${avail} disponível`}</span>
+                    </div>
+                  </div>
+                  <button onClick={()=>openEdit(item)} style={{fontSize:12,color:"var(--primary)",fontWeight:600,background:"none",border:"none",cursor:"pointer",fontFamily:"inherit"}}>Editar</button>
+                  <button onClick={()=>onSave(eq.filter(e=>e.id!==item.id))} style={{fontSize:12,color:"#f87171",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit"}}>Excluir</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Helpers ─────────────────────────────────────────────── */
+const sh={fontSize:15,fontWeight:700,color:"var(--text)",marginBottom:10,marginTop:0};
+const inp={width:"100%",border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px",fontSize:13,outline:"none",boxSizing:"border-box",fontFamily:"'Poppins',system-ui,sans-serif",background:"var(--inp-bg)",color:"var(--text)"};
+
+function Field({label,children,err,style={}}){
+  return(
+    <div style={{flex:1,...style}}>
+      <label style={{fontSize:12,fontWeight:600,color:"var(--text)",display:"block",marginBottom:5}}>{label}</label>
+      {children}
+      {err&&<p style={{fontSize:11,color:"#dc2626",margin:"3px 0 0"}}>Campo obrigatório</p>}
+    </div>
+  );
+}
+function IF({label,val}){return(<div><p style={{fontSize:11,color:"var(--muted)",margin:"0 0 2px"}}>{label}</p><p style={{fontSize:13,fontWeight:600,color:"var(--text)",margin:0}}>{val}</p></div>);}
+function Blank({children}){return<div style={{background:"var(--card)",borderRadius:16,padding:"32px 20px",textAlign:"center",color:"var(--muted)",fontSize:13,border:"1px solid var(--border)"}}>{children}</div>;}
+function Alert({children,color,bg,border}){return<div style={{background:bg,border:`1px solid ${border}`,borderRadius:10,padding:"8px 12px",fontSize:12,color}}>{children}</div>;}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
